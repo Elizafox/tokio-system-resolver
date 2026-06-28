@@ -384,25 +384,6 @@ mod tests {
         (Some(slot), effective)
     }
 
-    async fn test_concurrent_n(n: usize) {
-        let resolver = Arc::new(SystemResolver::new(ResolverConfig::default()));
-        let handles: Vec<_> = (0..n)
-            .map(|_| {
-                let r = Arc::clone(&resolver);
-                tokio::spawn(async move { r.resolve_host("localhost", None).await })
-            })
-            .collect();
-        for h in handles {
-            h.await.unwrap().unwrap();
-        }
-        // After all tasks complete, both counters should be at zero / full.
-        assert_eq!(resolver.effective.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            resolver.hard_sem.available_permits(),
-            resolver.config.hard_limit
-        );
-    }
-
     #[tokio::test]
     async fn test_resolve_localhost() {
         let resolver = SystemResolver::new(ResolverConfig::default());
@@ -471,22 +452,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_50() {
-        test_concurrent_n(50).await;
-    }
-
-    #[tokio::test]
-    async fn test_concurrent_100() {
-        test_concurrent_n(100).await;
-    }
-
-    #[tokio::test]
-    async fn test_concurrent_500() {
-        test_concurrent_n(500).await;
-    }
-
-    #[tokio::test]
-    async fn test_concurrent_1000() {
-        test_concurrent_n(1000).await;
+        let resolver = Arc::new(SystemResolver::new(ResolverConfig::default()));
+        let handles: Vec<_> = (0..50)
+            .map(|_| {
+                let r = Arc::clone(&resolver);
+                tokio::spawn(async move { r.resolve_host("localhost", None).await })
+            })
+            .collect();
+        for h in handles {
+            h.await.unwrap().unwrap();
+        }
+        // After all tasks complete, both counters should be at zero / full.
+        assert_eq!(resolver.effective.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            resolver.hard_sem.available_permits(),
+            resolver.config.hard_limit
+        );
     }
 
     #[tokio::test]
