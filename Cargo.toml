@@ -1,0 +1,34 @@
+[package]
+name = "tokio-system-resolver"
+version = "0.1.0"
+edition = "2024"
+description = "Tokio-compatible async resolver wrapping the system getaddrinfo and getnameinfo calls"
+license = "Unlicense"
+keywords = ["dns", "resolver", "getaddrinfo", "tokio", "async"]
+categories = ["network-programming", "asynchronous", "os"]
+readme = "README.md"
+repository = "https://github.com/Elizafox/tokio-system-resolver"
+rust-version = "1.85.1"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+# Intentional: soft_slot/hard_permit are dropped at precise points for stall semantics.
+significant_drop_tightening = "allow"
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "sync", "test-util", "time"] }
+libc = "0.2"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "sync", "test-util", "time", "rt-multi-thread"] }
+
+[[bench]]
+name = "throughput"
+harness = false
