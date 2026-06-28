@@ -30,6 +30,7 @@ use std::time::Duration;
 ///     timeout: Some(Duration::from_secs(2)),
 /// };
 /// ```
+#[derive(Debug, Copy, Clone)]
 pub struct ResolverConfig {
     /// Target maximum number of concurrently running resolution threads.
     ///

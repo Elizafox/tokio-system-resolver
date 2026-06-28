@@ -93,11 +93,11 @@ pub fn call_getaddrinfo(
 // sockaddr has align = 1 on some platforms, but the actual pointed-to data is
 // always a fully-aligned `sockaddr_in` or `sockaddr_in6` as guaranteed by
 // POSIX.
-#[allow(clippy::cast_ptr_alignment)]
 unsafe fn parse_node(node: &addrinfo) -> Option<AddrInfo> {
     let addr = match node.ai_family {
         AF_INET => {
             // SAFETY: node.ai_addr is sockaddr_in for AF_INET and allocated
+            #[allow(clippy::cast_ptr_alignment, reason = "casting as API designed")]
             let sin = unsafe { &*(node.ai_addr as *const sockaddr_in) };
             let ip = Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr));
             let port = u16::from_be(sin.sin_port);
@@ -105,6 +105,7 @@ unsafe fn parse_node(node: &addrinfo) -> Option<AddrInfo> {
         }
         AF_INET6 => {
             // SAFETY: node.ai_addr is sockaddr_in6 for AF_INET6 and allocated
+            #[allow(clippy::cast_ptr_alignment, reason = "casting as API designed")]
             let sin6 = unsafe { &*(node.ai_addr as *const sockaddr_in6) };
             let ip = Ipv6Addr::from(sin6.sin6_addr.s6_addr);
             let port = u16::from_be(sin6.sin6_port);
@@ -142,7 +143,6 @@ unsafe fn parse_node(node: &addrinfo) -> Option<AddrInfo> {
 // bytes, both fitting in u8 (for sin_len) and well under socklen_t's u32
 // range. AF_INET/AF_INET6 are 2 and 10 respectively, fitting in sa_family_t
 // (u8 on BSDs).
-#[allow(clippy::cast_possible_truncation)]
 fn socketaddr_to_raw(addr: SocketAddr) -> (sockaddr_storage, socklen_t) {
     match addr {
         SocketAddr::V4(v4) => {
@@ -155,7 +155,15 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (sockaddr_storage, socklen_t) {
                     target_os = "netbsd",
                     target_os = "openbsd",
                 ))]
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "sizeof(sockaddr_in) fits in a byte by design"
+                )]
                 sin_len: size_of::<sockaddr_in>() as u8,
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "sa_family_t wide enough by design"
+                )]
                 sin_family: AF_INET as sa_family_t,
                 sin_port: v4.port().to_be(),
                 sin_addr: in_addr {
@@ -163,6 +171,11 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (sockaddr_storage, socklen_t) {
                 },
                 sin_zero: [0; 8],
             };
+
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "socklen_t wide enough by design"
+            )]
             let len = size_of::<sockaddr_in>() as socklen_t;
             let mut storage = MaybeUninit::<sockaddr_storage>::zeroed();
             // SAFETY: `sockaddr_storage` is defined to have at least the size
@@ -185,7 +198,15 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (sockaddr_storage, socklen_t) {
                     target_os = "netbsd",
                     target_os = "openbsd",
                 ))]
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "sizeof(sockaddr_in6) fits in a byte by design"
+                )]
                 sin6_len: size_of::<sockaddr_in6>() as u8,
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "sa_family_t wide enough by design"
+                )]
                 sin6_family: AF_INET6 as sa_family_t,
                 sin6_port: v6.port().to_be(),
                 sin6_flowinfo: v6.flowinfo(),
@@ -194,6 +215,10 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (sockaddr_storage, socklen_t) {
                 },
                 sin6_scope_id: v6.scope_id(),
             };
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "socklen_t wide enough by design"
+            )]
             let len = size_of::<sockaddr_in6>() as socklen_t;
             let mut storage = MaybeUninit::<sockaddr_storage>::zeroed();
             // SAFETY: same as the IPv4 arm — sockaddr_storage has sufficient
@@ -352,9 +377,15 @@ mod tests {
                 target_os = "netbsd",
                 target_os = "openbsd",
             ))]
-            #[allow(clippy::cast_possible_truncation)]
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "sizeof(sockaddr_in) fits in a byte by design"
+            )]
             sin_len: size_of::<sockaddr_in>() as u8,
-            #[allow(clippy::cast_possible_truncation)]
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "sa_family_t wide enough by design"
+            )]
             sin_family: AF_INET as sa_family_t,
             sin_port: 0u16.to_be(),
             sin_addr: in_addr {
@@ -367,7 +398,10 @@ mod tests {
             ai_family: AF_INET,
             ai_socktype: SOCK_STREAM,
             ai_protocol: 0,
-            #[allow(clippy::cast_possible_truncation)]
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "socklen_t wide enough by design"
+            )]
             ai_addrlen: size_of::<sockaddr_in>() as socklen_t,
             ai_addr: (&raw mut raw_addr).cast::<sockaddr>(),
             ai_canonname: canonname.as_ptr().cast_mut(),
