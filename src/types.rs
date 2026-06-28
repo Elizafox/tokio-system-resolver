@@ -7,10 +7,12 @@
 use std::net::SocketAddr;
 use std::ops::BitOr;
 
+#[cfg(not(any(target_os = "netbsd", target_os = "openbsd")))]
+use libc::AI_V4MAPPED;
 use libc::{
     AF_INET, AF_INET6, AF_UNSPEC, AI_ADDRCONFIG, AI_CANONNAME, AI_NUMERICHOST, AI_NUMERICSERV,
-    AI_PASSIVE, AI_V4MAPPED, NI_DGRAM, NI_NAMEREQD, NI_NOFQDN, NI_NUMERICHOST, NI_NUMERICSERV,
-    SOCK_DGRAM, SOCK_RAW, SOCK_STREAM, c_int,
+    AI_PASSIVE, NI_DGRAM, NI_NAMEREQD, NI_NOFQDN, NI_NUMERICHOST, NI_NUMERICSERV, SOCK_DGRAM,
+    SOCK_RAW, SOCK_STREAM, c_int,
 };
 
 /// Address family passed to `getaddrinfo` via the hints struct.
@@ -104,6 +106,7 @@ impl AiFlags {
     pub const NUMERICSERV: Self = Self(AI_NUMERICSERV);
 
     /// `AI_V4MAPPED` — Return IPv4-mapped IPv6 addresses when no IPv6 records exist.
+    #[cfg(not(any(target_os = "netbsd", target_os = "openbsd")))]
     pub const V4MAPPED: Self = Self(AI_V4MAPPED);
 
     /// `AI_ADDRCONFIG` — Only return address families configured on the host.
@@ -168,7 +171,10 @@ impl BitOr for NiFlags {
 ///
 /// let hints = AddrInfoHints {
 ///     family: AddressFamily::Inet6,
+/// #   #[cfg(not(any(target_os = "netbsd", target_os = "openbsd")))]
 ///     flags: AiFlags::ADDRCONFIG | AiFlags::V4MAPPED,
+/// #   #[cfg(any(target_os = "netbsd", target_os = "openbsd"))]
+/// #   flags: AiFlags::ADDRCONFIG,
 ///     ..Default::default()
 /// };
 /// ```
@@ -243,8 +249,17 @@ mod tests {
 
     #[test]
     fn flag_bitors_preserve_underlying_bits() {
-        let ai = AiFlags::CANONNAME | AiFlags::ADDRCONFIG | AiFlags::V4MAPPED;
-        assert_eq!(ai.0, AI_CANONNAME | AI_ADDRCONFIG | AI_V4MAPPED);
+        #[cfg(not(any(target_os = "netbsd", target_os = "openbsd")))]
+        {
+            let ai = AiFlags::CANONNAME | AiFlags::ADDRCONFIG | AiFlags::V4MAPPED;
+            assert_eq!(ai.0, AI_CANONNAME | AI_ADDRCONFIG | AI_V4MAPPED);
+        }
+
+        #[cfg(any(target_os = "netbsd", target_os = "openbsd"))]
+        {
+            let ai = AiFlags::CANONNAME | AiFlags::ADDRCONFIG;
+            assert_eq!(ai.0, AI_CANONNAME | AI_ADDRCONFIG);
+        }
 
         let ni = NiFlags::NUMERICHOST | NiFlags::NUMERICSERV | NiFlags::DGRAM;
         assert_eq!(ni.0, NI_NUMERICHOST | NI_NUMERICSERV | NI_DGRAM);
