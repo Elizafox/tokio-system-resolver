@@ -1,0 +1,99 @@
+name: OS CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian
+            image: debian:stable-slim
+            install: |
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                build-essential \
+                ca-certificates \
+                curl \
+                pkg-config
+          - name: Alpine
+            image: alpine:latest
+            install: |
+              apk add --no-cache \
+                build-base \
+                curl \
+                pkgconf
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests in ${{ matrix.name }}
+        run: |
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            "${{ matrix.image }}" \
+            sh -lc '
+              set -eux
+              '"${{ matrix.install }}"'
+              export RUSTUP_HOME=/root/.rustup
+              export CARGO_HOME=/root/.cargo
+              curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+              . "$CARGO_HOME/env"
+              cargo test --all-targets
+            '
+
+  freebsd:
+    name: FreeBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          prepare: |
+            pkg update
+            pkg install -y curl rust
+          run: |
+            set -eux
+            cargo test --all-targets
+
+  netbsd:
+    name: NetBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test on NetBSD
+        uses: vmactions/netbsd-vm@v1
+        with:
+          prepare: |
+            /usr/sbin/pkg_add pkgin || true
+            pkgin -y update
+            pkgin -y install curl rust
+          run: |
+            set -eux
+            cargo test --all-targets
+
+  openbsd:
+    name: OpenBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test on OpenBSD
+        uses: vmactions/openbsd-vm@v1
+        with:
+          prepare: |
+            pkg_add curl rust
+          run: |
+            set -eux
+            cargo test --all-targets
