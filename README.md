@@ -1,5 +1,7 @@
 # tokio-system-resolver
 
+[![OS CI](https://github.com/Elizafox/tokio-system-resolver/actions/workflows/os-ci.yml/badge.svg)](https://github.com/Elizafox/tokio-system-resolver/actions/workflows/os-ci.yml)
+
 Tokio-compatible async DNS resolver wrapping the system `getaddrinfo(3)` and
 `getnameinfo(3)` calls.
 
