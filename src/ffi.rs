@@ -12,7 +12,7 @@ use libc::{
 
 // NI_MAXSERV is not exposed by libc on Linux. The value is 32 on every
 // platform.
-const NI_MAXSERV: socklen_t = 32;
+const NI_MAXSERV: usize = 32;
 
 use crate::error::ResolveError;
 use crate::types::{AddrInfo, AddrInfoHints, NiFlags, ResolvedNames, SockType};
@@ -235,7 +235,15 @@ pub fn call_getnameinfo(addr: SocketAddr, flags: NiFlags) -> Result<ResolvedName
     let (storage, salen) = socketaddr_to_raw(addr);
 
     let mut host_buf = [0u8; NI_MAXHOST as usize];
-    let mut serv_buf = [0u8; NI_MAXSERV as usize];
+    let mut serv_buf = [0u8; NI_MAXSERV];
+    let host_len = host_buf
+        .len()
+        .try_into()
+        .expect("NI_MAXHOST fits in getnameinfo length type");
+    let serv_len = serv_buf
+        .len()
+        .try_into()
+        .expect("NI_MAXSERV fits in getnameinfo length type");
 
     // SAFETY: `storage` holds a valid sockaddr_in or sockaddr_in6; `salen` is
     // the exact size of that type (not the full sockaddr_storage), matching
@@ -247,9 +255,9 @@ pub fn call_getnameinfo(addr: SocketAddr, flags: NiFlags) -> Result<ResolvedName
             (&raw const storage).cast::<sockaddr>(),
             salen,
             host_buf.as_mut_ptr().cast::<c_char>(),
-            NI_MAXHOST,
+            host_len,
             serv_buf.as_mut_ptr().cast::<c_char>(),
-            NI_MAXSERV,
+            serv_len,
             flags.0,
         )
     };

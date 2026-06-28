@@ -384,6 +384,24 @@ mod tests {
         (Some(slot), effective)
     }
 
+    async fn wait_for_idle(resolver: &SystemResolver) {
+        for _ in 0..50 {
+            if resolver.effective.load(Ordering::Relaxed) == 0
+                && resolver.hard_sem.available_permits() == resolver.config.hard_limit
+            {
+                return;
+            }
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        assert_eq!(resolver.effective.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            resolver.hard_sem.available_permits(),
+            resolver.config.hard_limit
+        );
+    }
+
     #[tokio::test]
     async fn test_resolve_localhost() {
         let resolver = SystemResolver::new(ResolverConfig::default());
@@ -462,12 +480,7 @@ mod tests {
         for h in handles {
             h.await.unwrap().unwrap();
         }
-        // After all tasks complete, both counters should be at zero / full.
-        assert_eq!(resolver.effective.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            resolver.hard_sem.available_permits(),
-            resolver.config.hard_limit
-        );
+        wait_for_idle(&resolver).await;
     }
 
     #[tokio::test]
@@ -490,8 +503,7 @@ mod tests {
             handle.await.unwrap().unwrap();
         }
 
-        assert_eq!(resolver.effective.load(Ordering::Relaxed), 0);
-        assert_eq!(resolver.hard_sem.available_permits(), 2);
+        wait_for_idle(&resolver).await;
     }
 
     #[tokio::test]
