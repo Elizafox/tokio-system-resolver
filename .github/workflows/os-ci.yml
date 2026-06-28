@@ -97,3 +97,15 @@ jobs:
           run: |
             set -eux
             cargo test --all-targets
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test --all-targets
