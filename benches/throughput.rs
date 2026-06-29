@@ -53,17 +53,17 @@ impl Workload {
             }
             Self::ResolveAddrLocalhostV4 => {
                 let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
-                resolver.resolve_addr(addr, NiFlags::NONE).await.unwrap();
+                let _ = resolver.resolve_addr(addr, NiFlags::NONE).await.unwrap();
             }
             Self::ResolveAddrNumericV4 => {
                 let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 80));
                 let flags = NiFlags::NUMERICHOST | NiFlags::NUMERICSERV;
-                resolver.resolve_addr(addr, flags).await.unwrap();
+                let _ = resolver.resolve_addr(addr, flags).await.unwrap();
             }
             Self::ResolveAddrNumericV6 => {
                 let addr = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 443, 0, 0));
                 let flags = NiFlags::NUMERICHOST | NiFlags::NUMERICSERV;
-                resolver.resolve_addr(addr, flags).await.unwrap();
+                let _ = resolver.resolve_addr(addr, flags).await.unwrap();
             }
         }
     }
