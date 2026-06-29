@@ -30,11 +30,21 @@ impl Drop for AddrInfoList {
 }
 
 pub fn call_getaddrinfo(
-    host: &str,
+    host: Option<&str>,
     service: Option<&str>,
     hints: Option<AddrInfoHints>,
 ) -> Result<Vec<AddrInfo>, ResolveError> {
-    let node = CString::new(host)
+    // POSIX requires at least one of node or service to be non-null.
+    if host.is_none() && service.is_none() {
+        return Err(ResolveError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "host and service cannot both be unspecified",
+        )));
+    }
+
+    let node = host
+        .map(CString::new)
+        .transpose()
         .map_err(|e| ResolveError::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
     let service = service
         .map(CString::new)
@@ -58,13 +68,14 @@ pub fn call_getaddrinfo(
 
     let mut res: *mut addrinfo = ptr::null_mut();
 
-    // SAFETY: `node` is a valid null-terminated C string (from CString);
-    // `hints_ptr` is null or a pointer to the valid addrinfo built above
-    // (lifetime covers this call); `res` is a valid writable pointer to receive
-    // the result.
+    // SAFETY: `node` and `service` are null or valid null-terminated C strings
+    // (from CString) living for the duration of this call; at least one is
+    // non-null (guarded above). `hints_ptr` is null or a pointer to the valid
+    // addrinfo built above (lifetime covers this call); `res` is a valid
+    // writable pointer to receive the result.
     let ret = unsafe {
         getaddrinfo(
-            node.as_ptr(),
+            node.as_ref().map_or(ptr::null(), |value| value.as_ptr()),
             service.as_ref().map_or(ptr::null(), |value| value.as_ptr()),
             hints_ptr,
             &raw mut res,
@@ -131,22 +142,19 @@ unsafe fn parse_node(node: &addrinfo) -> Option<AddrInfo> {
         _ => return None,
     };
 
-    let canonname = if node.ai_canonname.is_null() {
-        None
+    let (canonname, canonname_raw) = if node.ai_canonname.is_null() {
+        (None, None)
     } else {
-        Some(
-            // SAFETY: ai_canonname is non-null (checked above); getaddrinfo
-            // guarantees it is a valid null-terminated C string that lives as
-            // long as the addrinfo list.
-            unsafe { CStr::from_ptr(node.ai_canonname) }
-                .to_string_lossy()
-                .into_owned(),
-        )
+        // SAFETY: ai_canonname is non-null (checked above); getaddrinfo
+        // guarantees it is a valid null-terminated C string that lives as
+        // long as the addrinfo list.
+        split_name(unsafe { CStr::from_ptr(node.ai_canonname) }.to_bytes())
     };
 
     Some(AddrInfo {
         addr,
         canonname,
+        canonname_raw,
         socktype: SockType::from(node.ai_socktype),
         protocol: Protocol::from(node.ai_protocol),
     })
@@ -284,20 +292,37 @@ pub fn call_getnameinfo(addr: SocketAddr, flags: NiFlags) -> Result<ResolvedName
         });
     }
 
-    let to_opt = |buf: &[u8]| -> Option<String> {
+    let split_buf = |buf: &[u8]| -> (Option<String>, Option<Vec<u8>>) {
         // SAFETY: getnameinfo succeeded and wrote a null-terminated string
         // into buf; the buffer was zero-initialized so it is null-terminated
         // even if getnameinfo wrote nothing.
-        let s = unsafe { CStr::from_ptr(buf.as_ptr().cast::<c_char>()) }
-            .to_string_lossy()
-            .into_owned();
-        (!s.is_empty()).then_some(s)
+        let bytes = unsafe { CStr::from_ptr(buf.as_ptr().cast::<c_char>()) }.to_bytes();
+        split_name(bytes)
     };
 
+    let (hostname, hostname_raw) = split_buf(&host_buf);
+    let (service, service_raw) = split_buf(&serv_buf);
+
     Ok(ResolvedNames {
-        hostname: to_opt(&host_buf),
-        service: to_opt(&serv_buf),
+        hostname,
+        service,
+        hostname_raw,
+        service_raw,
     })
+}
+
+/// Split a (NUL-excluded) byte slice into a lossy UTF-8 `String` and the exact
+/// bytes. Both are `None` when the slice is empty, matching the "system returned
+/// an empty string" convention.
+fn split_name(bytes: &[u8]) -> (Option<String>, Option<Vec<u8>>) {
+    if bytes.is_empty() {
+        (None, None)
+    } else {
+        (
+            Some(String::from_utf8_lossy(bytes).into_owned()),
+            Some(bytes.to_vec()),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -313,11 +338,33 @@ mod tests {
 
     #[test]
     fn getaddrinfo_rejects_interior_nul() {
-        let err = call_getaddrinfo("bad\0host", None, None).unwrap_err();
+        let err = call_getaddrinfo(Some("bad\0host"), None, None).unwrap_err();
         assert!(matches!(
             err,
             ResolveError::Io(ref io_err) if io_err.kind() == io::ErrorKind::InvalidInput
         ));
+    }
+
+    #[test]
+    fn getaddrinfo_rejects_both_unspecified() {
+        let err = call_getaddrinfo(None, None, None).unwrap_err();
+        assert!(matches!(
+            err,
+            ResolveError::Io(ref io_err) if io_err.kind() == io::ErrorKind::InvalidInput
+        ));
+    }
+
+    #[test]
+    fn getaddrinfo_null_node_returns_loopback() {
+        // NULL node with a numeric service and no AI_PASSIVE yields loopback.
+        let hints = AddrInfoHints {
+            flags: AiFlags::NUMERICSERV,
+            ..Default::default()
+        };
+        let results = call_getaddrinfo(None, Some("80"), Some(hints)).unwrap();
+        assert!(!results.is_empty());
+        assert!(results.iter().all(|info| info.addr.port() == 80));
+        assert!(results.iter().all(|info| info.addr.ip().is_loopback()));
     }
 
     #[test]
@@ -329,7 +376,7 @@ mod tests {
             flags: AiFlags::NUMERICHOST,
         };
 
-        let results = call_getaddrinfo("127.0.0.1", None, Some(hints)).unwrap();
+        let results = call_getaddrinfo(Some("127.0.0.1"), None, Some(hints)).unwrap();
         assert!(!results.is_empty());
         assert!(
             results
@@ -346,7 +393,7 @@ mod tests {
             ..Default::default()
         };
 
-        let err = call_getaddrinfo("999.999.999.999", None, Some(hints)).unwrap_err();
+        let err = call_getaddrinfo(Some("999.999.999.999"), None, Some(hints)).unwrap_err();
         assert!(matches!(err, ResolveError::Gai(_)));
     }
 
@@ -358,7 +405,7 @@ mod tests {
             ..Default::default()
         };
 
-        let results = call_getaddrinfo("127.0.0.1", Some("443"), Some(hints)).unwrap();
+        let results = call_getaddrinfo(Some("127.0.0.1"), Some("443"), Some(hints)).unwrap();
         assert!(!results.is_empty());
         assert!(results.iter().all(|info| info.addr.port() == 443));
     }

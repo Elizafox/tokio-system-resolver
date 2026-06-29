@@ -18,7 +18,7 @@ pedantic = { level = "warn", priority = -1 }
 nursery  = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
-# Intentional: soft_slot/hard_permit are dropped at precise points for stall semantics.
+# Intentional: the soft/hard permits are dropped at precise points for stall semantics.
 significant_drop_tightening = "allow"
 
 [dependencies]
@@ -27,7 +27,8 @@ libc = "0.2"
 thiserror = "2"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "sync", "time", "rt-multi-thread"] }
+# test-util provides paused-time control (start_paused) used by the timer tests.
+tokio = { version = "1", features = ["macros", "sync", "time", "test-util", "rt-multi-thread"] }
 
 [[bench]]
 name = "throughput"

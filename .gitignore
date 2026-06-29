@@ -1,1 +1,3 @@
 target/
+# This is a library; consumers pin their own dependency versions.
+Cargo.lock

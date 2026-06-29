@@ -365,7 +365,19 @@ pub struct AddrInfo {
     pub addr: SocketAddr,
 
     /// The canonical name, populated only when [`AiFlags::CANONNAME`] was set.
+    ///
+    /// This is a lossy UTF-8 rendering: bytes that are not valid UTF-8 are
+    /// replaced with the Unicode replacement character (U+FFFD). For the exact
+    /// bytes returned by the system, use [`canonname_raw`](Self::canonname_raw).
     pub canonname: Option<String>,
+
+    /// The canonical name as the exact bytes returned by `getaddrinfo`, with the
+    /// trailing NUL removed.
+    ///
+    /// Populated whenever [`canonname`](Self::canonname) is. Canonical names
+    /// originate from DNS, `/etc/hosts`, or NSS modules and are not guaranteed
+    /// to be valid UTF-8, so this preserves them losslessly.
+    pub canonname_raw: Option<Vec<u8>>,
 
     /// The socket type associated with this record.
     pub socktype: SockType,
@@ -383,10 +395,31 @@ pub struct AddrInfo {
 #[must_use]
 pub struct ResolvedNames {
     /// The hostname for the address, or `None` if the system returned an empty string.
+    ///
+    /// This is a lossy UTF-8 rendering: bytes that are not valid UTF-8 are
+    /// replaced with the Unicode replacement character (U+FFFD). For the exact
+    /// bytes returned by the system, use [`hostname_raw`](Self::hostname_raw).
     pub hostname: Option<String>,
 
     /// The service name for the port, or `None` if the system returned an empty string.
+    ///
+    /// Lossy UTF-8, like [`hostname`](Self::hostname). For the exact bytes, use
+    /// [`service_raw`](Self::service_raw).
     pub service: Option<String>,
+
+    /// The hostname as the exact bytes returned by `getnameinfo`, with the
+    /// trailing NUL removed, or `None` if the system returned an empty string.
+    ///
+    /// Reverse-resolved names originate from DNS PTR records, `/etc/hosts`, or
+    /// NSS modules and are not guaranteed to be valid UTF-8, so this preserves
+    /// them losslessly. Populated whenever [`hostname`](Self::hostname) is.
+    pub hostname_raw: Option<Vec<u8>>,
+
+    /// The service name as the exact bytes returned by `getnameinfo`, with the
+    /// trailing NUL removed, or `None` if the system returned an empty string.
+    ///
+    /// Populated whenever [`service`](Self::service) is.
+    pub service_raw: Option<Vec<u8>>,
 }
 
 #[cfg(test)]

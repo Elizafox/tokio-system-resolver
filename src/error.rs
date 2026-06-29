@@ -42,9 +42,14 @@ pub enum ResolveError {
     #[error(transparent)]
     Io(#[from] io::Error),
 
-    /// The resolver's hard-limit semaphore was closed, which only happens if
-    /// the [`SystemResolver`](crate::SystemResolver) is dropped while queries
-    /// are still in flight.
+    /// The call could not complete because the resolver stopped admitting work.
+    ///
+    /// This is returned when:
+    ///
+    /// - [`SystemResolver::shutdown`](crate::SystemResolver::shutdown) is called
+    ///   while this call is waiting for soft- or hard-limit capacity, or
+    /// - the worker thread terminated without producing a result (for example,
+    ///   it panicked), dropping the result channel.
     #[error("resolver cancelled")]
     Cancelled,
 
