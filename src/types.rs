@@ -40,12 +40,13 @@ impl From<AddressFamily> for c_int {
 }
 
 /// Socket type associated with an address record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SockType {
-    /// `SOCK_STREAM` (TCP).
+    /// `SOCK_STREAM` — TCP (default).
+    #[default]
     Stream,
 
-    /// `SOCK_DGRAM` (UDP).
+    /// `SOCK_DGRAM` — UDP.
     Dgram,
 
     /// `SOCK_RAW`.
