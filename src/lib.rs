@@ -63,5 +63,5 @@ pub use config::ResolverConfig;
 pub use error::ResolveError;
 pub use resolver::SystemResolver;
 pub use types::{
-    AddrInfo, AddrInfoHints, AddressFamily, AiFlags, NiFlags, ResolvedNames, SockType,
+    AddrInfo, AddrInfoHints, AddressFamily, AiFlags, NiFlags, Protocol, ResolvedNames, SockType,
 };

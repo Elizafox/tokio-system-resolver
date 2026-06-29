@@ -1,6 +1,6 @@
 [package]
 name = "tokio-system-resolver"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 description = "Tokio-compatible async resolver wrapping the system getaddrinfo and getnameinfo calls"
 license = "Unlicense"
