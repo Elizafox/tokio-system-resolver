@@ -1,7 +1,10 @@
 //! Tokio-compatible async resolver wrapping the system [`getaddrinfo(3)`] and
 //! [`getnameinfo(3)`] calls.
 //!
-//! Blocking POSIX calls are offloaded to on-demand OS threads. Concurrency is
+//! POSIX calls that may block are offloaded to on-demand OS threads. Calls that
+//! are guaranteed not to block — purely numeric `getnameinfo`, and `getaddrinfo`
+//! with a numeric or absent host and service — run inline on the calling task
+//! with no thread (see [`SystemResolver`]). Concurrency for the threaded path is
 //! controlled by a two-tier limit:
 //!
 //! - **Soft limit** – the target maximum number of concurrently running

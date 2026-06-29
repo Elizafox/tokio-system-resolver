@@ -14,7 +14,39 @@ use tokio::time::Instant;
 use crate::config::ResolverConfig;
 use crate::error::ResolveError;
 use crate::ffi;
-use crate::types::{AddrInfo, AddrInfoHints, NiFlags, ResolvedNames};
+use crate::types::{AddrInfo, AddrInfoHints, AiFlags, NiFlags, ResolvedNames};
+
+/// Whether a `getnameinfo` request is guaranteed not to consult the network,
+/// files, or NSS, and so can run inline on the calling task instead of on a
+/// worker thread.
+///
+/// `NI_NUMERICHOST | NI_NUMERICSERV` makes the call pure string formatting of
+/// the supplied address and port — no reverse DNS, no `/etc/services` lookup.
+const fn getnameinfo_is_inline(flags: NiFlags) -> bool {
+    flags.contains(NiFlags::NUMERICHOST) && flags.contains(NiFlags::NUMERICSERV)
+}
+
+/// Whether a `getaddrinfo` request is guaranteed not to consult the network,
+/// files, or NSS, and so can run inline on the calling task.
+///
+/// This holds when the host cannot trigger a name lookup (it is absent, or
+/// `AI_NUMERICHOST` forces a numeric-only parse), the service cannot trigger a
+/// lookup (it is absent, or `AI_NUMERICSERV` forces a numeric-only parse), and
+/// `AI_ADDRCONFIG` — which inspects the system's configured interfaces — is not
+/// requested. POSIX guarantees `AI_NUMERICHOST`/`AI_NUMERICSERV` prevent any
+/// name-resolution service from being invoked.
+const fn getaddrinfo_is_inline(
+    host: Option<&str>,
+    service: Option<&str>,
+    hints: Option<&AddrInfoHints>,
+) -> bool {
+    let Some(hints) = hints else {
+        return false;
+    };
+    let host_ok = host.is_none() || hints.flags.contains(AiFlags::NUMERICHOST);
+    let service_ok = service.is_none() || hints.flags.contains(AiFlags::NUMERICSERV);
+    host_ok && service_ok && !hints.flags.contains(AiFlags::ADDRCONFIG)
+}
 
 /// Stack size for the worker threads that run the blocking system calls.
 ///
@@ -29,9 +61,11 @@ const WORKER_STACK_SIZE: usize = 512 * 1024;
 
 /// Async resolver backed by the system `getaddrinfo` and `getnameinfo` calls.
 ///
-/// Each call spawns a dedicated OS thread that runs the blocking system call,
-/// then sends the result back through a oneshot channel. Thread counts are
-/// governed by the limits in [`ResolverConfig`]:
+/// A call that may block — anything that can reach DNS, NSS, or `/etc/*` — runs
+/// on a dedicated OS thread and sends its result back through a oneshot channel.
+/// A call that is guaranteed *not* to block runs inline on the calling task with
+/// no thread and no permit (see "Inline fast path" below). Thread counts for the
+/// blocking path are governed by the limits in [`ResolverConfig`]:
 ///
 /// - At most [`soft_limit`](ResolverConfig::soft_limit) threads run
 ///   concurrently under normal conditions.
@@ -42,6 +76,24 @@ const WORKER_STACK_SIZE: usize = 512 * 1024;
 /// - At most [`hard_limit`](ResolverConfig::hard_limit) threads run at any
 ///   time. Callers that arrive when this ceiling is reached await backpressure
 ///   until a permit becomes available.
+///
+/// # Inline fast path
+///
+/// Requests that cannot perform name resolution are guaranteed not to block, so
+/// they run inline on the calling task — no worker thread, no soft/hard permit,
+/// and not subject to [`ResolverConfig::timeout`]. This applies to:
+///
+/// - [`resolve_addr`](Self::resolve_addr) with `NI_NUMERICHOST | NI_NUMERICSERV`
+///   (pure address/port formatting), and
+/// - [`resolve_host`](Self::resolve_host) /
+///   [`resolve_host_service`](Self::resolve_host_service) /
+///   [`resolve_passive`](Self::resolve_passive) when the host is numeric
+///   (`AI_NUMERICHOST`) or absent and the service is numeric (`AI_NUMERICSERV`)
+///   or absent, and `AI_ADDRCONFIG` is not set.
+///
+/// Because these calls hold no permit, the concurrency limits do not apply to
+/// them; they are bounded only by the executor. After [`shutdown`](Self::shutdown)
+/// they still return [`ResolveError::Cancelled`].
 ///
 /// `SystemResolver` is cheaply cloneable via [`Arc`] — wrap it in one to share
 /// it across tasks.
@@ -175,6 +227,16 @@ impl SystemResolver {
         service: Option<&str>,
         hints: Option<AddrInfoHints>,
     ) -> Result<Vec<AddrInfo>, ResolveError> {
+        // Fast path: a guaranteed non-blocking lookup runs inline, with no
+        // worker thread, no permit, and no timeout (it cannot stall).
+        if getaddrinfo_is_inline(host, service, hints.as_ref()) {
+            return if self.is_closed() {
+                Err(ResolveError::Cancelled)
+            } else {
+                ffi::call_getaddrinfo(host, service, hints)
+            };
+        }
+
         let deadline = self.config.timeout.map(|timeout| Instant::now() + timeout);
         let soft_permit = Self::acquire_permit(&self.soft_sem, deadline).await?;
 
@@ -410,6 +472,16 @@ impl SystemResolver {
         addr: SocketAddr,
         flags: NiFlags,
     ) -> Result<ResolvedNames, ResolveError> {
+        // Fast path: a guaranteed non-blocking lookup runs inline, with no
+        // worker thread, no permit, and no timeout (it cannot stall).
+        if getnameinfo_is_inline(flags) {
+            return if self.is_closed() {
+                Err(ResolveError::Cancelled)
+            } else {
+                ffi::call_getnameinfo(addr, flags)
+            };
+        }
+
         let deadline = self.config.timeout.map(|timeout| Instant::now() + timeout);
         let soft_permit = Self::acquire_permit(&self.soft_sem, deadline).await?;
 
@@ -959,5 +1031,144 @@ mod tests {
         assert_eq!(names.hostname.as_deref(), Some("127.0.0.1"));
         assert_eq!(names.hostname_raw.as_deref(), Some(&b"127.0.0.1"[..]));
         assert_eq!(names.service_raw.as_deref(), Some(&b"80"[..]));
+    }
+
+    #[test]
+    fn getnameinfo_inline_predicate() {
+        assert!(getnameinfo_is_inline(
+            NiFlags::NUMERICHOST | NiFlags::NUMERICSERV
+        ));
+        // Either flag alone may still hit /etc/services or reverse DNS.
+        assert!(!getnameinfo_is_inline(NiFlags::NUMERICHOST));
+        assert!(!getnameinfo_is_inline(NiFlags::NUMERICSERV));
+        assert!(!getnameinfo_is_inline(NiFlags::NONE));
+    }
+
+    #[test]
+    fn getaddrinfo_inline_predicate() {
+        let numeric = AddrInfoHints {
+            flags: AiFlags::NUMERICHOST | AiFlags::NUMERICSERV,
+            ..Default::default()
+        };
+        assert!(getaddrinfo_is_inline(
+            Some("127.0.0.1"),
+            Some("80"),
+            Some(&numeric)
+        ));
+
+        // Numeric host, no service: still inline.
+        let host_only = AddrInfoHints {
+            flags: AiFlags::NUMERICHOST,
+            ..Default::default()
+        };
+        assert!(getaddrinfo_is_inline(
+            Some("127.0.0.1"),
+            None,
+            Some(&host_only)
+        ));
+
+        // Absent host (passive) with numeric service: inline.
+        let passive = AddrInfoHints {
+            flags: AiFlags::PASSIVE | AiFlags::NUMERICSERV,
+            ..Default::default()
+        };
+        assert!(getaddrinfo_is_inline(None, Some("80"), Some(&passive)));
+
+        // A service name without NUMERICSERV may hit /etc/services.
+        assert!(!getaddrinfo_is_inline(
+            Some("127.0.0.1"),
+            Some("http"),
+            Some(&host_only)
+        ));
+
+        // No hints: a host would be resolved via NSS/DNS.
+        assert!(!getaddrinfo_is_inline(Some("127.0.0.1"), None, None));
+
+        // ADDRCONFIG inspects system interfaces, so it disables the fast path.
+        let with_addrcfg = AddrInfoHints {
+            flags: AiFlags::NUMERICHOST | AiFlags::NUMERICSERV | AiFlags::ADDRCONFIG,
+            ..Default::default()
+        };
+        assert!(!getaddrinfo_is_inline(
+            Some("127.0.0.1"),
+            Some("80"),
+            Some(&with_addrcfg)
+        ));
+    }
+
+    /// A numeric reverse lookup runs inline, so it succeeds even when every
+    /// soft and hard permit is held and the timeout is tiny.
+    #[tokio::test(start_paused = true)]
+    async fn test_numeric_addr_bypasses_limits() {
+        let resolver = Arc::new(SystemResolver::new(ResolverConfig {
+            soft_limit: 1,
+            hard_limit: 1,
+            stall_threshold: Duration::from_secs(1),
+            timeout: Some(Duration::from_millis(1)),
+        }));
+        let _soft = Arc::clone(&resolver.soft_sem)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let _hard = Arc::clone(&resolver.hard_sem)
+            .acquire_owned()
+            .await
+            .unwrap();
+
+        let addr: SocketAddr = "127.0.0.1:80".parse().unwrap();
+        let names = resolver
+            .resolve_addr(addr, NiFlags::NUMERICHOST | NiFlags::NUMERICSERV)
+            .await
+            .unwrap();
+        assert_eq!(names.hostname.as_deref(), Some("127.0.0.1"));
+
+        // The permits were never touched.
+        assert_eq!(resolver.soft_sem.available_permits(), 0);
+        assert_eq!(resolver.hard_sem.available_permits(), 0);
+    }
+
+    /// A numeric forward lookup likewise bypasses the limits.
+    #[tokio::test(start_paused = true)]
+    async fn test_numeric_host_bypasses_limits() {
+        let resolver = Arc::new(SystemResolver::new(ResolverConfig {
+            soft_limit: 1,
+            hard_limit: 1,
+            stall_threshold: Duration::from_secs(1),
+            timeout: Some(Duration::from_millis(1)),
+        }));
+        let _soft = Arc::clone(&resolver.soft_sem)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let _hard = Arc::clone(&resolver.hard_sem)
+            .acquire_owned()
+            .await
+            .unwrap();
+
+        let hints = AddrInfoHints {
+            flags: AiFlags::NUMERICHOST | AiFlags::NUMERICSERV,
+            ..Default::default()
+        };
+        let results = resolver
+            .resolve_host_service("127.0.0.1", "80", Some(hints))
+            .await
+            .unwrap();
+        assert!(!results.is_empty());
+        assert!(results.iter().all(|r| r.addr.port() == 80));
+
+        assert_eq!(resolver.soft_sem.available_permits(), 0);
+        assert_eq!(resolver.hard_sem.available_permits(), 0);
+    }
+
+    /// After shutdown, even inline calls are rejected.
+    #[tokio::test]
+    async fn test_shutdown_rejects_inline_call() {
+        let resolver = SystemResolver::new(ResolverConfig::default());
+        resolver.shutdown();
+        let addr: SocketAddr = "127.0.0.1:80".parse().unwrap();
+        let result = resolver
+            .resolve_addr(addr, NiFlags::NUMERICHOST | NiFlags::NUMERICSERV)
+            .await;
+        assert!(matches!(result, Err(ResolveError::Cancelled)));
     }
 }
