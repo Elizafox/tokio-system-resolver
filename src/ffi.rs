@@ -19,10 +19,6 @@ use crate::types::{AddrInfo, AddrInfoHints, NiFlags, Protocol, ResolvedNames, So
 
 struct AddrInfoList(*mut addrinfo);
 
-// SAFETY: getaddrinfo result is not thread-affine; freeaddrinfo is re-entrant
-// for distinct lists.
-unsafe impl Send for AddrInfoList {}
-
 impl Drop for AddrInfoList {
     fn drop(&mut self) {
         if !self.0.is_null() {
