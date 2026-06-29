@@ -23,7 +23,8 @@ jobs:
                 build-essential \
                 ca-certificates \
                 curl \
-                pkg-config
+                pkg-config \
+                netbase
           - name: Alpine
             image: alpine:latest
             install: |
