@@ -256,7 +256,6 @@ impl SystemResolver {
     /// if the configured timeout expires while waiting for capacity or the
     /// system call result, or [`ResolveError::Cancelled`] if the resolver is
     /// dropped while the hard-limit semaphore is being acquired.
-    #[must_use]
     pub async fn resolve_host(
         &self,
         host: &str,
@@ -339,7 +338,6 @@ impl SystemResolver {
     /// waiting for capacity or the system call result, or
     /// [`ResolveError::Cancelled`] if the resolver is dropped while the
     /// hard-limit semaphore is being acquired.
-    #[must_use]
     pub async fn resolve_addr(
         &self,
         addr: SocketAddr,
