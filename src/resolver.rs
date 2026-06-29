@@ -16,6 +16,17 @@ use crate::error::ResolveError;
 use crate::ffi;
 use crate::types::{AddrInfo, AddrInfoHints, NiFlags, ResolvedNames};
 
+/// Stack size for the worker threads that run the blocking system calls.
+///
+/// `getaddrinfo`/`getnameinfo` need far less than a thread's default stack
+/// (~2 MiB on most platforms), so a smaller stack sharply cuts the memory
+/// reserved when threads pile up under stalls (up to `hard_limit` of them at
+/// once). The value keeps a comfortable margin above what NSS modules
+/// (`/etc/nsswitch.conf` plugins such as mDNS, LDAP, or SSSD) are likely to use
+/// on the stack — going much smaller risks a stack overflow inside third-party
+/// resolver code, which would abort the process.
+const WORKER_STACK_SIZE: usize = 512 * 1024;
+
 /// Async resolver backed by the system `getaddrinfo` and `getnameinfo` calls.
 ///
 /// Each call spawns a dedicated OS thread that runs the blocking system call,
@@ -180,14 +191,17 @@ impl SystemResolver {
         let service = service.map(ToOwned::to_owned);
         let stall_threshold = self.config.stall_threshold;
 
-        if let Err(err) = std::thread::Builder::new().spawn(move || {
-            let _ = tx.send(ffi::call_getaddrinfo(
-                host.as_deref(),
-                service.as_deref(),
-                hints,
-            ));
-            drop(hard_permit);
-        }) {
+        if let Err(err) = std::thread::Builder::new()
+            .stack_size(WORKER_STACK_SIZE)
+            .spawn(move || {
+                let _ = tx.send(ffi::call_getaddrinfo(
+                    host.as_deref(),
+                    service.as_deref(),
+                    hints,
+                ));
+                drop(hard_permit);
+            })
+        {
             // Spawning the worker failed (e.g. the process hit its thread
             // limit). The closure — and the hard permit it captured — was
             // dropped by the failed spawn; release the soft permit too.
@@ -410,10 +424,13 @@ impl SystemResolver {
         let (tx, mut rx) = tokio::sync::oneshot::channel();
         let stall_threshold = self.config.stall_threshold;
 
-        if let Err(err) = std::thread::Builder::new().spawn(move || {
-            let _ = tx.send(ffi::call_getnameinfo(addr, flags));
-            drop(hard_permit);
-        }) {
+        if let Err(err) = std::thread::Builder::new()
+            .stack_size(WORKER_STACK_SIZE)
+            .spawn(move || {
+                let _ = tx.send(ffi::call_getnameinfo(addr, flags));
+                drop(hard_permit);
+            })
+        {
             // See resolve_host_impl: the failed spawn dropped the hard permit;
             // release the soft permit too.
             drop(soft_permit);
