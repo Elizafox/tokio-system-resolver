@@ -87,6 +87,7 @@ impl From<SockType> for c_int {
 /// let flags = AiFlags::CANONNAME | AiFlags::ADDRCONFIG;
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[must_use]
 pub struct AiFlags(pub c_int);
 
 impl AiFlags {
@@ -170,6 +171,7 @@ impl Not for AiFlags {
 /// let flags = NiFlags::NUMERICHOST | NiFlags::NUMERICSERV;
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[must_use]
 pub struct NiFlags(pub c_int);
 
 impl NiFlags {
@@ -261,6 +263,7 @@ impl Not for NiFlags {
 /// };
 /// ```
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct AddrInfoHints {
     /// Restrict results to this address family. Defaults to [`AddressFamily::Unspec`].
     pub family: AddressFamily,
@@ -284,6 +287,7 @@ impl Default for AddrInfoHints {
 
 /// A single address record returned by [`crate::SystemResolver::resolve_host`].
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct AddrInfo {
     /// The resolved socket address (IP + port 0, since no service was requested).
     pub addr: SocketAddr,
@@ -297,6 +301,7 @@ pub struct AddrInfo {
 
 /// Names returned by [`crate::SystemResolver::resolve_addr`].
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct ResolvedNames {
     /// The hostname for the address, or `None` if the system returned an empty string.
     pub hostname: Option<String>,

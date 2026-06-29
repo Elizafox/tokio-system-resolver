@@ -33,7 +33,6 @@ impl Drop for AddrInfoList {
     }
 }
 
-#[must_use]
 pub fn call_getaddrinfo(
     host: &str,
     hints: Option<AddrInfoHints>,
@@ -233,7 +232,6 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (sockaddr_storage, socklen_t) {
     }
 }
 
-#[must_use]
 pub fn call_getnameinfo(addr: SocketAddr, flags: NiFlags) -> Result<ResolvedNames, ResolveError> {
     let (storage, salen) = socketaddr_to_raw(addr);
 
