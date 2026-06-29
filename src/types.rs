@@ -5,7 +5,7 @@
 //! the flag / enum types used to configure calls.
 
 use std::net::SocketAddr;
-use std::ops::BitOr;
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Not};
 
 #[cfg(not(any(target_os = "netbsd", target_os = "openbsd")))]
 use libc::AI_V4MAPPED;
@@ -86,7 +86,7 @@ impl From<SockType> for c_int {
 /// use tokio_system_resolver::AiFlags;
 /// let flags = AiFlags::CANONNAME | AiFlags::ADDRCONFIG;
 /// ```
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct AiFlags(pub c_int);
 
 impl AiFlags {
@@ -113,10 +113,51 @@ impl AiFlags {
     pub const ADDRCONFIG: Self = Self(AI_ADDRCONFIG);
 }
 
+impl AiFlags {
+    #[must_use]
+    pub const fn contains(&self, flag: Self) -> bool {
+        (self.0 & flag.0) > 0
+    }
+
+    pub const fn insert(&mut self, flag: Self) {
+        self.0 |= flag.0;
+    }
+
+    pub const fn remove(&mut self, flag: Self) {
+        self.0 &= !flag.0;
+    }
+}
+
+impl BitAnd for AiFlags {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl BitAndAssign for AiFlags {
+    fn bitand_assign(&mut self, rhs: Self) {
+        *self = Self(self.0 & rhs.0);
+    }
+}
+
 impl BitOr for AiFlags {
     type Output = Self;
     fn bitor(self, rhs: Self) -> Self {
         Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for AiFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = Self(self.0 | rhs.0);
+    }
+}
+
+impl Not for AiFlags {
+    type Output = Self;
+    fn not(self) -> Self {
+        Self(!self.0)
     }
 }
 
@@ -128,7 +169,7 @@ impl BitOr for AiFlags {
 /// use tokio_system_resolver::NiFlags;
 /// let flags = NiFlags::NUMERICHOST | NiFlags::NUMERICSERV;
 /// ```
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct NiFlags(pub c_int);
 
 impl NiFlags {
@@ -151,10 +192,51 @@ impl NiFlags {
     pub const DGRAM: Self = Self(NI_DGRAM);
 }
 
+impl NiFlags {
+    #[must_use]
+    pub const fn contains(&self, flag: Self) -> bool {
+        (self.0 & flag.0) > 0
+    }
+
+    pub const fn insert(&mut self, flag: Self) {
+        self.0 |= flag.0;
+    }
+
+    pub const fn remove(&mut self, flag: Self) {
+        self.0 &= !flag.0;
+    }
+}
+
+impl BitAnd for NiFlags {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl BitAndAssign for NiFlags {
+    fn bitand_assign(&mut self, rhs: Self) {
+        *self = Self(self.0 & rhs.0);
+    }
+}
+
 impl BitOr for NiFlags {
     type Output = Self;
     fn bitor(self, rhs: Self) -> Self {
         Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for NiFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = Self(self.0 | rhs.0);
+    }
+}
+
+impl Not for NiFlags {
+    type Output = Self;
+    fn not(self) -> Self {
+        Self(!self.0)
     }
 }
 
@@ -263,6 +345,64 @@ mod tests {
 
         let ni = NiFlags::NUMERICHOST | NiFlags::NUMERICSERV | NiFlags::DGRAM;
         assert_eq!(ni.0, NI_NUMERICHOST | NI_NUMERICSERV | NI_DGRAM);
+    }
+
+    #[test]
+    fn aiflags_support_flag_manipulation() {
+        let mut flags = AiFlags::CANONNAME | AiFlags::ADDRCONFIG;
+        assert!(flags.contains(AiFlags::CANONNAME));
+        assert!(flags.contains(AiFlags::ADDRCONFIG));
+        assert!(!flags.contains(AiFlags::NUMERICHOST));
+
+        flags.insert(AiFlags::NUMERICHOST);
+        assert!(flags.contains(AiFlags::NUMERICHOST));
+
+        let masked = flags & (AiFlags::CANONNAME | AiFlags::NUMERICHOST);
+        assert!(masked.contains(AiFlags::CANONNAME));
+        assert!(masked.contains(AiFlags::NUMERICHOST));
+        assert!(!masked.contains(AiFlags::ADDRCONFIG));
+
+        flags &= !AiFlags::CANONNAME;
+        assert!(!flags.contains(AiFlags::CANONNAME));
+        assert!(flags.contains(AiFlags::ADDRCONFIG));
+        assert!(flags.contains(AiFlags::NUMERICHOST));
+
+        flags |= AiFlags::NUMERICSERV;
+        assert!(flags.contains(AiFlags::NUMERICSERV));
+
+        flags.remove(AiFlags::ADDRCONFIG | AiFlags::NUMERICHOST);
+        assert!(!flags.contains(AiFlags::ADDRCONFIG));
+        assert!(!flags.contains(AiFlags::NUMERICHOST));
+        assert!(flags.contains(AiFlags::NUMERICSERV));
+    }
+
+    #[test]
+    fn niflags_support_flag_manipulation() {
+        let mut flags = NiFlags::NUMERICHOST | NiFlags::NUMERICSERV;
+        assert!(flags.contains(NiFlags::NUMERICHOST));
+        assert!(flags.contains(NiFlags::NUMERICSERV));
+        assert!(!flags.contains(NiFlags::DGRAM));
+
+        flags.insert(NiFlags::DGRAM);
+        assert!(flags.contains(NiFlags::DGRAM));
+
+        let masked = flags & (NiFlags::NUMERICSERV | NiFlags::DGRAM);
+        assert!(!masked.contains(NiFlags::NUMERICHOST));
+        assert!(masked.contains(NiFlags::NUMERICSERV));
+        assert!(masked.contains(NiFlags::DGRAM));
+
+        flags &= !NiFlags::NUMERICSERV;
+        assert!(flags.contains(NiFlags::NUMERICHOST));
+        assert!(!flags.contains(NiFlags::NUMERICSERV));
+        assert!(flags.contains(NiFlags::DGRAM));
+
+        flags |= NiFlags::NAMEREQD;
+        assert!(flags.contains(NiFlags::NAMEREQD));
+
+        flags.remove(NiFlags::NUMERICHOST | NiFlags::DGRAM);
+        assert!(!flags.contains(NiFlags::NUMERICHOST));
+        assert!(!flags.contains(NiFlags::DGRAM));
+        assert!(flags.contains(NiFlags::NAMEREQD));
     }
 
     #[test]
