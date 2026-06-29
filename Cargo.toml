@@ -22,12 +22,12 @@ module_name_repetitions = "allow"
 significant_drop_tightening = "allow"
 
 [dependencies]
-tokio = { version = "1", features = ["macros", "sync", "test-util", "time"] }
+tokio = { version = "1", features = ["macros", "sync", "time"] }
 libc = "0.2"
 thiserror = "2"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "sync", "test-util", "time", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "sync", "time", "rt-multi-thread"] }
 
 [[bench]]
 name = "throughput"
