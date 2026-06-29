@@ -35,9 +35,14 @@ impl Drop for AddrInfoList {
 
 pub fn call_getaddrinfo(
     host: &str,
+    service: Option<&str>,
     hints: Option<AddrInfoHints>,
 ) -> Result<Vec<AddrInfo>, ResolveError> {
     let node = CString::new(host)
+        .map_err(|e| ResolveError::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
+    let service = service
+        .map(CString::new)
+        .transpose()
         .map_err(|e| ResolveError::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
 
     // SAFETY: `p` is a valid aligned pointer into a live MaybeUninit. All
@@ -61,7 +66,14 @@ pub fn call_getaddrinfo(
     // `hints_ptr` is null or a pointer to the valid addrinfo built above
     // (lifetime covers this call); `res` is a valid writable pointer to receive
     // the result.
-    let ret = unsafe { getaddrinfo(node.as_ptr(), ptr::null(), hints_ptr, &raw mut res) };
+    let ret = unsafe {
+        getaddrinfo(
+            node.as_ptr(),
+            service.as_ref().map_or(ptr::null(), |value| value.as_ptr()),
+            hints_ptr,
+            &raw mut res,
+        )
+    };
 
     if ret != 0 {
         return Err(ResolveError::Gai(ret));
@@ -296,7 +308,7 @@ mod tests {
 
     #[test]
     fn getaddrinfo_rejects_interior_nul() {
-        let err = call_getaddrinfo("bad\0host", None).unwrap_err();
+        let err = call_getaddrinfo("bad\0host", None, None).unwrap_err();
         assert!(matches!(
             err,
             ResolveError::Io(ref io_err) if io_err.kind() == io::ErrorKind::InvalidInput
@@ -311,7 +323,7 @@ mod tests {
             flags: AiFlags::NUMERICHOST,
         };
 
-        let results = call_getaddrinfo("127.0.0.1", Some(hints)).unwrap();
+        let results = call_getaddrinfo("127.0.0.1", None, Some(hints)).unwrap();
         assert!(!results.is_empty());
         assert!(
             results
@@ -328,8 +340,21 @@ mod tests {
             ..Default::default()
         };
 
-        let err = call_getaddrinfo("999.999.999.999", Some(hints)).unwrap_err();
+        let err = call_getaddrinfo("999.999.999.999", None, Some(hints)).unwrap_err();
         assert!(matches!(err, ResolveError::Gai(_)));
+    }
+
+    #[test]
+    fn getaddrinfo_numeric_service_sets_port() {
+        let hints = AddrInfoHints {
+            family: AddressFamily::Inet,
+            flags: AiFlags::NUMERICHOST | AiFlags::NUMERICSERV,
+            ..Default::default()
+        };
+
+        let results = call_getaddrinfo("127.0.0.1", Some("443"), Some(hints)).unwrap();
+        assert!(!results.is_empty());
+        assert!(results.iter().all(|info| info.addr.port() == 443));
     }
 
     #[test]

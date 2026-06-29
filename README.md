@@ -47,6 +47,19 @@ for a in &addrs {
 }
 ```
 
+### Host + service lookup
+
+```rust
+use tokio_system_resolver::{SystemResolver, ResolverConfig};
+
+let resolver = SystemResolver::new(ResolverConfig::default());
+
+let addrs = resolver.resolve_host_service("example.com", "443", None).await?;
+for a in &addrs {
+    println!("{}", a.addr); // port 443 included
+}
+```
+
 ### Reverse lookup
 
 ```rust

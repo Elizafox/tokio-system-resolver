@@ -36,6 +36,12 @@
 //!         println!("{}", a.addr);
 //!     }
 //!
+//!     let https = resolver
+//!         .resolve_host_service("example.com", "443", None)
+//!         .await
+//!         .unwrap();
+//!     println!("{}", https[0].addr);
+//!
 //!     let names = resolver
 //!         .resolve_addr("93.184.216.34:80".parse().unwrap(), NiFlags::NONE)
 //!         .await

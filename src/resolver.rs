@@ -201,6 +201,36 @@ impl SystemResolver {
         }
     }
 
+    async fn resolve_host_impl(
+        &self,
+        host: &str,
+        service: Option<&str>,
+        hints: Option<AddrInfoHints>,
+    ) -> Result<Vec<AddrInfo>, ResolveError> {
+        let deadline = self.config.timeout.map(|timeout| Instant::now() + timeout);
+        let soft_slot = self.acquire_soft_slot(deadline).await?;
+
+        let hard_permit = match self.acquire_hard_permit(deadline).await {
+            Ok(permit) => permit,
+            Err(err) => {
+                drop(soft_slot);
+                return Err(err);
+            }
+        };
+
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let host = host.to_owned();
+        let service = service.map(ToOwned::to_owned);
+        let stall_threshold = self.config.stall_threshold;
+
+        std::thread::spawn(move || {
+            let _ = tx.send(ffi::call_getaddrinfo(&host, service.as_deref(), hints));
+            drop(hard_permit);
+        });
+
+        Self::await_worker_result(Some(soft_slot), stall_threshold, deadline, &mut rx).await
+    }
+
     /// Resolve a hostname to a list of socket addresses via `getaddrinfo`.
     ///
     /// `hints` narrows the query (address family, socket type, flags). Pass
@@ -261,27 +291,35 @@ impl SystemResolver {
         host: &str,
         hints: Option<AddrInfoHints>,
     ) -> Result<Vec<AddrInfo>, ResolveError> {
-        let deadline = self.config.timeout.map(|timeout| Instant::now() + timeout);
-        let soft_slot = self.acquire_soft_slot(deadline).await?;
+        self.resolve_host_impl(host, None, hints).await
+    }
 
-        let hard_permit = match self.acquire_hard_permit(deadline).await {
-            Ok(permit) => permit,
-            Err(err) => {
-                drop(soft_slot);
-                return Err(err);
-            }
-        };
-
-        let (tx, mut rx) = tokio::sync::oneshot::channel();
-        let host = host.to_owned();
-        let stall_threshold = self.config.stall_threshold;
-
-        std::thread::spawn(move || {
-            let _ = tx.send(ffi::call_getaddrinfo(&host, hints));
-            drop(hard_permit);
-        });
-
-        Self::await_worker_result(Some(soft_slot), stall_threshold, deadline, &mut rx).await
+    /// Resolve a hostname and service to a list of socket addresses via
+    /// `getaddrinfo`.
+    ///
+    /// This is like [`resolve_host`](Self::resolve_host), but passes a service
+    /// name or numeric port string to `getaddrinfo` so the returned
+    /// [`SocketAddr`](std::net::SocketAddr) values have the corresponding port
+    /// populated.
+    ///
+    /// Pass values like `"http"` or `"443"` for `service`.
+    ///
+    /// # Cancellation
+    ///
+    /// Same semantics as [`resolve_host`](Self::resolve_host): dropping this
+    /// future is safe, and timing out does not stop an already-started worker
+    /// thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same error variants as [`resolve_host`](Self::resolve_host).
+    pub async fn resolve_host_service(
+        &self,
+        host: &str,
+        service: &str,
+        hints: Option<AddrInfoHints>,
+    ) -> Result<Vec<AddrInfo>, ResolveError> {
+        self.resolve_host_impl(host, Some(service), hints).await
     }
 
     /// Resolve a socket address to a hostname and service name via `getnameinfo`.
@@ -454,6 +492,28 @@ mod tests {
         let names = resolver.resolve_addr(addr, flags).await.unwrap();
         assert_eq!(names.hostname.as_deref(), Some("127.0.0.1"));
         assert_eq!(names.service.as_deref(), Some("80"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_host_service_numeric_port() {
+        let resolver = SystemResolver::new(ResolverConfig::default());
+        let results = resolver
+            .resolve_host_service("localhost", "443", None)
+            .await
+            .unwrap();
+        assert!(!results.is_empty());
+        assert!(results.iter().all(|r| r.addr.port() == 443));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_host_service_named_service() {
+        let resolver = SystemResolver::new(ResolverConfig::default());
+        let results = resolver
+            .resolve_host_service("127.0.0.1", "http", None)
+            .await
+            .unwrap();
+        assert!(!results.is_empty());
+        assert!(results.iter().all(|r| r.addr.port() == 80));
     }
 
     #[cfg(debug_assertions)]

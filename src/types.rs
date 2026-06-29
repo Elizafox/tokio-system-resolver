@@ -289,7 +289,12 @@ impl Default for AddrInfoHints {
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct AddrInfo {
-    /// The resolved socket address (IP + port 0, since no service was requested).
+    /// The resolved socket address.
+    ///
+    /// When produced by [`crate::SystemResolver::resolve_host`], the port is
+    /// `0` because no service was requested. When produced by
+    /// [`crate::SystemResolver::resolve_host_service`], the port reflects the
+    /// resolved service.
     pub addr: SocketAddr,
 
     /// The canonical name, populated only when [`AiFlags::CANONNAME`] was set.
