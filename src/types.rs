@@ -11,8 +11,9 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Not};
 use libc::AI_V4MAPPED;
 use libc::{
     AF_INET, AF_INET6, AF_UNSPEC, AI_ADDRCONFIG, AI_CANONNAME, AI_NUMERICHOST, AI_NUMERICSERV,
-    AI_PASSIVE, NI_DGRAM, NI_NAMEREQD, NI_NOFQDN, NI_NUMERICHOST, NI_NUMERICSERV, SOCK_DGRAM,
-    SOCK_RAW, SOCK_STREAM, c_int,
+    AI_PASSIVE, IPPROTO_ICMP, IPPROTO_ICMPV6, IPPROTO_IP, IPPROTO_TCP, IPPROTO_UDP, NI_DGRAM,
+    NI_NAMEREQD, NI_NOFQDN, NI_NUMERICHOST, NI_NUMERICSERV, SOCK_DGRAM, SOCK_RAW, SOCK_STREAM,
+    c_int,
 };
 
 /// Address family passed to `getaddrinfo` via the hints struct.
@@ -42,8 +43,11 @@ impl From<AddressFamily> for c_int {
 /// Socket type associated with an address record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SockType {
-    /// `SOCK_STREAM` — TCP (default).
+    /// Unspecified (default).
     #[default]
+    Unspec,
+
+    /// `SOCK_STREAM` — TCP.
     Stream,
 
     /// `SOCK_DGRAM` — UDP.
@@ -52,14 +56,14 @@ pub enum SockType {
     /// `SOCK_RAW`.
     Raw,
 
-    /// Any other `SOCK_*` value returned by the system, or `0` when used in
-    /// [`AddrInfoHints`] to request all socket types.
+    /// Any other `SOCK_*` value returned by the system.
     Other(i32),
 }
 
 impl From<c_int> for SockType {
     fn from(v: c_int) -> Self {
         match v {
+            0 => Self::Unspec,
             SOCK_STREAM => Self::Stream,
             SOCK_DGRAM => Self::Dgram,
             SOCK_RAW => Self::Raw,
@@ -71,10 +75,68 @@ impl From<c_int> for SockType {
 impl From<SockType> for c_int {
     fn from(s: SockType) -> Self {
         match s {
+            SockType::Unspec => 0,
             SockType::Stream => SOCK_STREAM,
             SockType::Dgram => SOCK_DGRAM,
             SockType::Raw => SOCK_RAW,
             SockType::Other(v) => v,
+        }
+    }
+}
+
+/// Protocol associated with an address record.
+///
+/// This mirrors the `ai_protocol` field returned by `getaddrinfo`.
+/// It is usually only relevant when the same socket address can be returned
+/// for multiple transport protocols.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Protocol {
+    /// Unspecified/default protocol (`IPPROTO_IP`, value `0` on supported
+    /// targets).
+    ///
+    /// Use this when you do not want to restrict the lookup to a specific
+    /// transport protocol.
+    #[default]
+    Unspec,
+
+    /// `IPPROTO_TCP` — TCP.
+    Tcp,
+
+    /// `IPPROTO_UDP` — UDP.
+    Udp,
+
+    /// `IPPROTO_ICMP` — ICMP (v4).
+    Icmp,
+
+    /// `IPPROTO_ICMPV6` — ICMP (v6).
+    IcmpV6,
+
+    /// Any other `IPPROTO_*` value returned by the system.
+    Other(i32),
+}
+
+impl From<c_int> for Protocol {
+    fn from(v: c_int) -> Self {
+        match v {
+            IPPROTO_IP => Self::Unspec,
+            IPPROTO_TCP => Self::Tcp,
+            IPPROTO_UDP => Self::Udp,
+            IPPROTO_ICMP => Self::Icmp,
+            IPPROTO_ICMPV6 => Self::IcmpV6,
+            other => Self::Other(other),
+        }
+    }
+}
+
+impl From<Protocol> for c_int {
+    fn from(s: Protocol) -> Self {
+        match s {
+            Protocol::Unspec => IPPROTO_IP,
+            Protocol::Tcp => IPPROTO_TCP,
+            Protocol::Udp => IPPROTO_UDP,
+            Protocol::Icmp => IPPROTO_ICMP,
+            Protocol::IcmpV6 => IPPROTO_ICMPV6,
+            Protocol::Other(v) => v,
         }
     }
 }
@@ -269,8 +331,11 @@ pub struct AddrInfoHints {
     /// Restrict results to this address family. Defaults to [`AddressFamily::Unspec`].
     pub family: AddressFamily,
 
-    /// Restrict results to this socket type. Use `SockType::Other(0)` for any.
+    /// Restrict results to this socket type. Use `SockType::Unspec` for any.
     pub socktype: SockType,
+
+    /// Restrict results to this protocol. Use `Protocol::Unspec` for any.
+    pub protocol: Protocol,
 
     /// Additional `AI_*` flags. Defaults to [`AiFlags::NONE`].
     pub flags: AiFlags,
@@ -280,7 +345,8 @@ impl Default for AddrInfoHints {
     fn default() -> Self {
         Self {
             family: AddressFamily::Unspec,
-            socktype: SockType::Other(0),
+            socktype: SockType::Unspec,
+            protocol: Protocol::Unspec,
             flags: AiFlags::NONE,
         }
     }
@@ -303,6 +369,13 @@ pub struct AddrInfo {
 
     /// The socket type associated with this record.
     pub socktype: SockType,
+
+    /// The protocol associated with this record, as returned by
+    /// `getaddrinfo`.
+    ///
+    /// This may distinguish otherwise similar records that share the same
+    /// socket address and socket type.
+    pub protocol: Protocol,
 }
 
 /// Names returned by [`crate::SystemResolver::resolve_addr`].
@@ -329,15 +402,34 @@ mod tests {
 
     #[test]
     fn socktype_round_trips_through_c_int() {
+        assert_eq!(SockType::from(0), SockType::Unspec);
         assert_eq!(SockType::from(SOCK_STREAM), SockType::Stream);
         assert_eq!(SockType::from(SOCK_DGRAM), SockType::Dgram);
         assert_eq!(SockType::from(SOCK_RAW), SockType::Raw);
         assert_eq!(SockType::from(12345), SockType::Other(12345));
 
+        assert_eq!(c_int::from(SockType::Unspec), 0);
         assert_eq!(c_int::from(SockType::Stream), SOCK_STREAM);
         assert_eq!(c_int::from(SockType::Dgram), SOCK_DGRAM);
         assert_eq!(c_int::from(SockType::Raw), SOCK_RAW);
         assert_eq!(c_int::from(SockType::Other(7)), 7);
+    }
+
+    #[test]
+    fn protocol_round_trips_through_c_int() {
+        assert_eq!(Protocol::from(IPPROTO_IP), Protocol::Unspec);
+        assert_eq!(Protocol::from(IPPROTO_TCP), Protocol::Tcp);
+        assert_eq!(Protocol::from(IPPROTO_UDP), Protocol::Udp);
+        assert_eq!(Protocol::from(IPPROTO_ICMP), Protocol::Icmp);
+        assert_eq!(Protocol::from(IPPROTO_ICMPV6), Protocol::IcmpV6);
+        assert_eq!(Protocol::from(12345), Protocol::Other(12345));
+
+        assert_eq!(c_int::from(Protocol::Unspec), IPPROTO_IP);
+        assert_eq!(c_int::from(Protocol::Tcp), IPPROTO_TCP);
+        assert_eq!(c_int::from(Protocol::Udp), IPPROTO_UDP);
+        assert_eq!(c_int::from(Protocol::Icmp), IPPROTO_ICMP);
+        assert_eq!(c_int::from(Protocol::IcmpV6), IPPROTO_ICMPV6);
+        assert_eq!(c_int::from(Protocol::Other(7)), 7);
     }
 
     #[test]
@@ -420,7 +512,7 @@ mod tests {
     fn addrinfo_hints_default_matches_unrestricted_lookup() {
         let hints = AddrInfoHints::default();
         assert_eq!(hints.family, AddressFamily::Unspec);
-        assert_eq!(hints.socktype, SockType::Other(0));
+        assert_eq!(hints.socktype, SockType::Unspec);
         assert_eq!(hints.flags.0, AiFlags::NONE.0);
     }
 }

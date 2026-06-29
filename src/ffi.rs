@@ -15,7 +15,7 @@ use libc::{
 const NI_MAXSERV: usize = 32;
 
 use crate::error::ResolveError;
-use crate::types::{AddrInfo, AddrInfoHints, NiFlags, ResolvedNames, SockType};
+use crate::types::{AddrInfo, AddrInfoHints, NiFlags, Protocol, ResolvedNames, SockType};
 
 struct AddrInfoList(*mut addrinfo);
 
@@ -54,7 +54,7 @@ pub fn call_getaddrinfo(
         (*p).ai_flags = h.flags.0;
         (*p).ai_family = c_int::from(h.family);
         (*p).ai_socktype = c_int::from(h.socktype);
-        (*p).ai_protocol = 0;
+        (*p).ai_protocol = c_int::from(h.protocol);
         ai.assume_init()
     });
 
@@ -148,6 +148,7 @@ unsafe fn parse_node(node: &addrinfo) -> Option<AddrInfo> {
         addr,
         canonname,
         socktype: SockType::from(node.ai_socktype),
+        protocol: Protocol::from(node.ai_protocol),
     })
 }
 
@@ -320,6 +321,7 @@ mod tests {
         let hints = AddrInfoHints {
             family: AddressFamily::Inet,
             socktype: SockType::Stream,
+            protocol: Protocol::Unspec,
             flags: AiFlags::NUMERICHOST,
         };
 
