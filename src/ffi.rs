@@ -33,7 +33,7 @@ impl Drop for AddrInfoList {
     }
 }
 
-// Inside a private module `pub` is equivalent to `pub(crate)`.
+#[must_use]
 pub fn call_getaddrinfo(
     host: &str,
     hints: Option<AddrInfoHints>,
@@ -93,6 +93,7 @@ pub fn call_getaddrinfo(
 // sockaddr has align = 1 on some platforms, but the actual pointed-to data is
 // always a fully-aligned `sockaddr_in` or `sockaddr_in6` as guaranteed by
 // POSIX.
+#[must_use]
 unsafe fn parse_node(node: &addrinfo) -> Option<AddrInfo> {
     let addr = match node.ai_family {
         AF_INET => {
@@ -143,6 +144,7 @@ unsafe fn parse_node(node: &addrinfo) -> Option<AddrInfo> {
 // bytes, both fitting in u8 (for sin_len) and well under socklen_t's u32
 // range. AF_INET/AF_INET6 are 2 and 10 respectively, fitting in sa_family_t
 // (u8 on BSDs).
+#[must_use]
 fn socketaddr_to_raw(addr: SocketAddr) -> (sockaddr_storage, socklen_t) {
     match addr {
         SocketAddr::V4(v4) => {
@@ -231,6 +233,7 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (sockaddr_storage, socklen_t) {
     }
 }
 
+#[must_use]
 pub fn call_getnameinfo(addr: SocketAddr, flags: NiFlags) -> Result<ResolvedNames, ResolveError> {
     let (storage, salen) = socketaddr_to_raw(addr);
 
