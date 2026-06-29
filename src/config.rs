@@ -64,6 +64,9 @@ pub struct ResolverConfig {
     /// spawned it continues running in the background and releases its
     /// hard-limit permit when it exits.
     ///
+    /// It does not apply to lookups taken by the inline fast path (see
+    /// [`SystemResolver`](crate::SystemResolver)), which cannot block.
+    ///
     /// Defaults to `None`, which means wait indefinitely.
     pub timeout: Option<Duration>,
 }

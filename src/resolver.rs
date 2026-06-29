@@ -343,8 +343,7 @@ impl SystemResolver {
     ///
     /// This is like [`resolve_host`](Self::resolve_host), but passes a service
     /// name or numeric port string to `getaddrinfo` so the returned
-    /// [`SocketAddr`](std::net::SocketAddr) values have the corresponding port
-    /// populated.
+    /// [`SocketAddr`] values have the corresponding port populated.
     ///
     /// Pass values like `"http"` or `"443"` for `service`.
     ///

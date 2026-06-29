@@ -16,8 +16,10 @@ else configured via `/etc/nsswitch.conf`, those resolvers will not see it.
 
 This crate delegates to the C library's `getaddrinfo` and `getnameinfo`
 instead, which means it behaves exactly like every other program on the host.
-The primary cost is that these calls block, so the crate offloads them to
-on-demand OS threads and bridges the result back to a Tokio future.
+Because these calls can block, the crate offloads them to on-demand OS threads
+and bridges the result back to a Tokio future. Lookups that are guaranteed not
+to block — purely numeric conversions — skip the thread and run inline on the
+calling task.
 
 ## Platform support
 
@@ -30,7 +32,7 @@ POSIX-compliant system should work.
 
 ```toml
 [dependencies]
-tokio-system-resolver = "0.1"
+tokio-system-resolver = "0.5"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -60,6 +62,24 @@ for a in &addrs {
 }
 ```
 
+### Passive / wildcard lookup
+
+Resolve a service with no host — useful for obtaining addresses to `bind` to.
+With `AiFlags::PASSIVE` you get wildcard addresses (`0.0.0.0` / `::`); without
+it, loopback.
+
+```rust
+use tokio_system_resolver::{SystemResolver, ResolverConfig, AddrInfoHints, AiFlags};
+
+let resolver = SystemResolver::new(ResolverConfig::default());
+
+let hints = AddrInfoHints { flags: AiFlags::PASSIVE, ..Default::default() };
+let addrs = resolver.resolve_passive("8080", Some(hints)).await?;
+for a in &addrs {
+    println!("{}", a.addr); // e.g. 0.0.0.0:8080
+}
+```
+
 ### Reverse lookup
 
 ```rust
@@ -71,6 +91,11 @@ let addr = "93.184.216.34:0".parse()?;
 let names = resolver.resolve_addr(addr, NiFlags::NONE).await?;
 println!("{:?}", names.hostname); // Some("example.com")
 ```
+
+`hostname` and `service` are lossy UTF-8. DNS, `/etc/hosts`, and NSS can return
+names that are not valid UTF-8; the exact bytes are preserved in
+`hostname_raw` / `service_raw` (and `AddrInfo::canonname_raw` for canonical
+names).
 
 ### Narrowing results with hints
 
@@ -100,8 +125,9 @@ let flags = NiFlags::NUMERICHOST | NiFlags::NUMERICSERV;
 
 ## Concurrency model
 
-Each resolution call occupies one OS thread for the duration of the system
-call. Thread counts are governed by two limits:
+Each resolution call that may block occupies one OS thread for the duration of
+the system call (calls that cannot block run inline — see *Inline fast path*
+below). Thread counts are governed by two limits:
 
 | Limit | Default | Meaning |
 |-------|---------|---------|
@@ -129,6 +155,20 @@ its hard-limit permit when it exits.
 **Backpressure.** When the hard limit is saturated, callers block on
 `acquire_owned()` until a permit is available. There is no queue size cap; use
 your own task semaphore upstream if you need one.
+
+**Inline fast path.** Lookups that cannot perform name resolution are guaranteed
+not to block, so they run inline on the calling task — no thread, no permit, and
+not subject to `timeout`. This covers `resolve_addr` with
+`NI_NUMERICHOST | NI_NUMERICSERV`, and `resolve_host` / `resolve_host_service` /
+`resolve_passive` when the host is numeric (`AI_NUMERICHOST`) or absent and the
+service is numeric (`AI_NUMERICSERV`) or absent, with `AI_ADDRCONFIG` unset.
+These calls are bounded only by the executor, not by the limits above.
+
+**Shutdown.** `resolver.shutdown()` stops the resolver from admitting new work:
+calls waiting for capacity — and any started afterwards, including inline ones —
+return `ResolveError::Cancelled`. Threads already running a system call finish
+in the background and release their permits. `is_closed()` reports whether
+shutdown has happened.
 
 
 ### Custom configuration
