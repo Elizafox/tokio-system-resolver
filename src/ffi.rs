@@ -5,9 +5,9 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::ptr;
 
 use libc::{
-    AF_INET, AF_INET6, NI_MAXHOST, addrinfo, c_char, c_int, freeaddrinfo, getaddrinfo, getnameinfo,
-    in_addr, in6_addr, sa_family_t, sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage,
-    socklen_t,
+    AF_INET, AF_INET6, EAI_SYSTEM, NI_MAXHOST, addrinfo, c_char, c_int, freeaddrinfo, getaddrinfo,
+    getnameinfo, in_addr, in6_addr, sa_family_t, sockaddr, sockaddr_in, sockaddr_in6,
+    sockaddr_storage, socklen_t,
 };
 
 // NI_MAXSERV is not exposed by libc on Linux. The value is 32 on every
@@ -76,7 +76,11 @@ pub fn call_getaddrinfo(
     };
 
     if ret != 0 {
-        return Err(ResolveError::Gai(ret));
+        return Err(if ret == EAI_SYSTEM {
+            io::Error::last_os_error().into()
+        } else {
+            ResolveError::Gai(ret)
+        });
     }
 
     let list = AddrInfoList(res);
@@ -277,7 +281,11 @@ pub fn call_getnameinfo(addr: SocketAddr, flags: NiFlags) -> Result<ResolvedName
     };
 
     if ret != 0 {
-        return Err(ResolveError::Gni(ret));
+        return Err(if ret == EAI_SYSTEM {
+            io::Error::last_os_error().into()
+        } else {
+            ResolveError::Gni(ret)
+        });
     }
 
     let to_opt = |buf: &[u8]| -> Option<String> {
