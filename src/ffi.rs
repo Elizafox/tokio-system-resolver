@@ -110,11 +110,12 @@ pub fn call_getaddrinfo(
     Ok(results)
 }
 
-// SAFETY: `ai_addr` is filled in by getaddrinfo and is correctly aligned and
-// typed for the advertised ai_family. The cast_ptr_alignment lint fires because
-// sockaddr has align = 1 on some platforms, but the actual pointed-to data is
-// always a fully-aligned `sockaddr_in` or `sockaddr_in6` as guaranteed by
-// POSIX.
+// # Safety
+//
+// `ai_addr` is filled in by getaddrinfo and is correctly aligned and typed for
+// the advertised ai_family. The cast_ptr_alignment lint fires because sockaddr
+// has align = 1 on some platforms, but the actual pointed-to data is always a
+// fully-aligned `sockaddr_in` or `sockaddr_in6` as guaranteed by POSIX.
 #[must_use]
 unsafe fn parse_node(node: &addrinfo) -> Option<AddrInfo> {
     let addr = match node.ai_family {
@@ -261,11 +262,11 @@ pub fn call_getnameinfo(addr: SocketAddr, flags: NiFlags) -> Result<ResolvedName
     let host_len = host_buf
         .len()
         .try_into()
-        .expect("NI_MAXHOST fits in getnameinfo length type");
+        .map_err(|_| ResolveError::LengthInvariantViolated)?;
     let serv_len = serv_buf
         .len()
         .try_into()
-        .expect("NI_MAXSERV fits in getnameinfo length type");
+        .map_err(|_| ResolveError::LengthInvariantViolated)?;
 
     // SAFETY: `storage` holds a valid sockaddr_in or sockaddr_in6; `salen` is
     // the exact size of that type (not the full sockaddr_storage), matching

@@ -57,6 +57,10 @@ pub enum ResolveError {
     /// [`ResolverConfig::timeout`](crate::ResolverConfig::timeout).
     #[error("resolver timed out")]
     TimedOut,
+
+    /// Length invariant violated (shouldn't happen).
+    #[error("Length invariant violated")]
+    LengthInvariantViolated,
 }
 
 #[cfg(test)]
