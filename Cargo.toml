@@ -78,6 +78,14 @@ significant_drop_tightening = "allow"
 tokio = { version = "1", features = ["macros", "sync", "time"] }
 libc = "0.2"
 thiserror = "2"
+# Optional, only for the `compare_hickory` benchmark (enabled via the
+# `bench-compare` feature). Pulls in a large dependency tree, so it is kept out
+# of the default build and CI.
+hickory-resolver = { version = "0.25.2", optional = true }
+
+[features]
+# Enables the `compare_hickory` benchmark.
+bench-compare = ["dep:hickory-resolver"]
 
 [dev-dependencies]
 # test-util provides paused-time control (start_paused) used by the timer tests.
@@ -86,3 +94,8 @@ tokio = { version = "1", features = ["macros", "sync", "time", "test-util", "rt-
 [[bench]]
 name = "throughput"
 harness = false
+
+[[bench]]
+name = "compare_hickory"
+harness = false
+required-features = ["bench-compare"]
